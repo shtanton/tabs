@@ -70,6 +70,12 @@ let handleConnection sock =
 let getTerminalEvent () =
   Lwt_stream.next termEvents >|= (fun e -> TerminalEvent e)
 
+let rec removeByIndex ?(index=0) ?(acc=[]) target state=
+  match state with
+  | [] -> acc
+  | tab :: state ->
+      if index=target then List.rev_append acc state else removeByIndex ~index:(index+1) ~acc:(tab :: acc) target state
+
 let startServer sock =
   let getSocketEvent () = Lwt_unix.accept sock
     >>= (fun (s, _) -> handleConnection s) >|= (fun s -> ServerEvent s) in
@@ -83,6 +89,7 @@ let startServer sock =
           let (action, events) = match e with
           | TerminalEvent (`Key (`Escape, _)) -> (Quit, [])
           | ServerEvent text -> (Update ((newTab text) :: state), (getSocketEvent ()) :: events)
+          | TerminalEvent (`Key (`ASCII ch, _)) -> (Update ((removeByIndex (Char.code ch - 97) state)), (getTerminalEvent ()) :: events)
           | TerminalEvent _ -> (Loop, (getTerminalEvent ()) :: events) in
           (action, List.rev_append (List.map Lwt.return es) events)
         ) in
@@ -92,7 +99,5 @@ let startServer sock =
       | Update state -> loop ~state events
     ) in
   loop [getTerminalEvent (); getSocketEvent ()]
-
-(*let () = Lwt_main.run (Lwt_stream.fold_s update termEvents [] >|= ignore)*)
 
 let () = Lwt_main.run (Server.createServer startServer)
