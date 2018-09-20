@@ -10,6 +10,16 @@ type tabState =
 type tab = {
   name: string;
   state: tabState;
+  show: string;
+  hide: string;
+  close: string;
+}
+
+type maybeTab = {
+  name: string option;
+  show: string option;
+  hide: string option;
+  close: string option;
 }
 
 type state = tab list
@@ -29,14 +39,52 @@ type event =
   | TerminalEvent of terminalEvent
   | ServerEvent of string
 
-let newTab name = {
-  name;
-  state= Show;
+let mock text = {
+  name=text;
+  show="";
+  hide="";
+  close="";
+  state=Show;
 }
+
+let newTab ?(state=Show) text oldState =
+  let json = match Yojson.Basic.from_string text with
+  | exception Yojson.Json_error e -> `String e
+  | json -> json in
+  let newTab = match json with
+  | `Assoc vals -> (
+    let maybeTab = List.fold_left (fun acc (key, v) ->
+      match key, v with
+      | "name", `String v -> {acc with name=Some v}
+      | "show", `String v -> {acc with show=Some v}
+      | "hide", `String v -> {acc with hide=Some v}
+      | "close", `String v -> {acc with close=Some v}
+      | _ -> acc
+    ) {name=None; show=None; hide=None; close=None} vals in
+    match maybeTab with
+    | {
+      name=Some name;
+      show=Some show;
+      hide=Some hide;
+      close=Some close;
+    } -> Some {
+      name;
+      show;
+      hide;
+      close;
+      state;
+    }
+    | _ -> Some (mock "Missing")
+  )
+  | _ -> None in
+  match newTab with
+  | None -> oldState
+  | Some tab -> tab :: oldState
+
 
 let letterOfVal v = v + 65 |> Char.chr |> String.make 1
 
-let imageOfTab letterVal {state; name} =
+let imageOfTab letterVal {state; name; _} =
   let colour = match state with
   | Show -> A.white
   | Hide -> A.yellow in
@@ -88,7 +136,7 @@ let startServer sock =
         | e :: es -> (
           let (action, events) = match e with
           | TerminalEvent (`Key (`Escape, _)) -> (Quit, [])
-          | ServerEvent text -> (Update ((newTab text) :: state), (getSocketEvent ()) :: events)
+          | ServerEvent text -> (Update (newTab text state), (getSocketEvent ()) :: events)
           | TerminalEvent (`Key (`ASCII ch, _)) -> (Update ((removeByIndex (Char.code ch - 97) state)), (getTerminalEvent ()) :: events)
           | TerminalEvent _ -> (Loop, (getTerminalEvent ()) :: events) in
           (action, List.rev_append (List.map Lwt.return es) events)
